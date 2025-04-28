@@ -20,7 +20,7 @@ if player dies, options to
 
 namespace Oxide.Plugins
 {
-    [Info("Corpse Location", "shinnova", "2.3.811")]
+    [Info("Corpse Location", "shinnova", "2.3.812")]
     [Description("Allows users to locate their latest corpse")]
     internal class CorpseLocation : RustPlugin
     {
@@ -122,64 +122,76 @@ namespace Oxide.Plugins
             Puts($"{player.displayName} ({player.UserIDString}) died at {player.transform.position}");
             if (config.showDeathGlobalChat)
             {
-                MessageAllPlayers(player);
+                SendGlobalMessage(player);
             }
             else if (config.showDeathTeamChat)
             {
-                MessageTeamMembers(player);
+                SendTeamMessage(player);
             }
             else if (config.showDeathOrTeamChat)
             {
-                if (MessageTeamMembers(player)) 
+                if (SendTeamMessage(player)) 
                     return;
-                MessageAllPlayers(player);
+                SendGlobalMessage(player);
             }
         }
 
-        private void MessageAllPlayers(BasePlayer player)
+        private void SendGlobalMessage(BasePlayer player)
         {
             foreach (var target in BasePlayer.activePlayerList)
             {
-                SendDeathMessage(player, target);
+                if (player == null || target == null)
+                    continue;
+
+                _deathBuilder.Clear();
+                _deathBuilder.Append(lang.GetMessage("GlobalDeathMessage", this, target.UserIDString));
+
+                if (_deathBuilder.Length == 0)
+                    return;
+
+                _deathBuilder
+                   .Replace("{username}", player.displayName)
+                   .Replace("{userid}", player.UserIDString)
+                   .Replace("{position}", player.transform.position.ToString())
+                   .Replace("{grid}", MapHelper.PositionToString(player.transform.position));
+
+                Player.Message(target, _deathBuilder.ToString(), config.steamId);
+                _deathBuilder.Clear();
             }
         }
 
-        private bool MessageTeamMembers(BasePlayer player)
+        private bool SendTeamMessage(BasePlayer player)
         {
             if (player.currentTeam == 0 || player.Team.members.Count == 0)
                 return false;
 
             bool sent = false;
-            foreach (var member in player.Team.GetOnlineMemberConnections())
+            foreach (var connection in player.Team.GetOnlineMemberConnections())
             {
+                if (player == null || connection == null)
+                    continue;
+
+                _deathBuilder.Clear();
+                _deathBuilder.Append(lang.GetMessage("TeamDeathMessage", this, connection.userid.ToString()));
+
+                if (_deathBuilder.Length == 0)
+                    return false;
+
+                _deathBuilder
+                   .Replace("{username}", player.displayName)
+                   .Replace("{userid}", player.UserIDString)
+                   .Replace("{position}", player.transform.position.ToString())
+                   .Replace("{grid}", MapHelper.PositionToString(player.transform.position));
+
+                ConsoleNetwork.SendClientCommand(connection, "chat.add", (int)ConVar.Chat.ChatChannel.Team, player.UserIDString, _deathBuilder.ToString());
+                _deathBuilder.Clear();
                 sent = true;
-                SendDeathMessage(player, member.player as BasePlayer);
             }
 
             return sent;
         }
 
         private StringBuilder _deathBuilder = new();
-        private void SendDeathMessage(BasePlayer player, BasePlayer target)
-        {
-            if (player == null || target == null)
-                return;
-
-            _deathBuilder.Clear();
-            _deathBuilder.Append(lang.GetMessage("Death", this, target.UserIDString));
-
-            if (_deathBuilder.Length == 0)
-                return;
-
-            _deathBuilder
-               .Replace("{username}", player.displayName)
-               .Replace("{userid}", player.UserIDString)
-               .Replace("{position}", player.transform.position.ToString())
-               .Replace("{grid}", MapHelper.PositionToString(player.transform.position));
-
-            Player.Message(target, _deathBuilder.ToString(), config.steamId);
-            _deathBuilder.Clear();
-        }
 
         private void OnEntitySpawned(PlayerCorpse corpse)
         {
@@ -648,7 +660,8 @@ namespace Oxide.Plugins
         {
             var messages = new Dictionary<string, string>
             {
-                ["Death"] = "{username} ({userid}) died at {position} in {grid}",
+                ["GlobalDeathMessage"] = "{username} ({userid}) died at {position} in {grid}",
+                ["TeamDeathMessage"] = "{username} ({userid}) died at {position} in {grid}",
                 ["YouDied"] = "Your corpse was last seen {0} meters from here.",
                 ["YouDiedGrid"] = "Your corpse was last seen {0} meters from here, in {1}.",
                 ["TeleportingIn"] = "Teleporting to your corpse in {0} second(s).",
